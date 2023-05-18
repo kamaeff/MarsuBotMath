@@ -30,9 +30,18 @@ def start_message(message):
     keyboard_start = ReplyKeyboardMarkup(row_width=1)
     start_button = KeyboardButton('Старт')
     keyboard_start.add(start_button)
+    msg = 'Привет! Я бот для тестирования по математике. Данный тест направлен на проверку математической грамотности. Вот тебе небольшая инструкция:\nПосле каждого вопроса тебе будет предоставлен выбор:\n"Да", тебе дается следующий вопрос\n"Нет" тебе зачитывается столько вопросов, сколько ты решил.\nЕсли ты случайно нажал кнопку "Нет", то можешь пройти тест заново командой /test, но занай у тебя всего лишь 5 попыток и будет зачитываться только лучишй результат.\nОБЯЗАТЕЛЬНО:\nЕсли у тебя получилось не целое число, то записывай с точкой (Например: 1.5)\n Удачи!'
+    bot.send_message(message.chat.id, msg)
+    msg1 ="Напиши /test"
+    bot.send_message(message.chat.id, msg1)
+    
+    
+@bot.message_handler(commands=['test'])
+def start_message(message):
     global used_questions
     used_questions = []
-    msg = 'Привет! Я бот для тестирования по математике.\nНо сначала мне нужно твое имя'
+    
+    msg = 'Начнем!\nКак тебя зовут?'
     bot.send_message(message.chat.id, msg)
     # Устанавливаем состояние "waiting_for_name" для ожидания имени пользователя
     bot.register_next_step_handler(message, process_name)
@@ -53,14 +62,15 @@ def process_surname(message):
     cursour_user = connect.cursor()
     nowUser = message.chat.id
     
+    print("User id login now:")
     print(nowUser)
     
     cursour_user.execute(f"SELECT id FROM users WHERE id={nowUser}")
     data = cursour_user.fetchone()
     
     if data is None:
-        t = 0
-        print(t)  
+        print("Такого пользователя нет, записываю в бд")
+        t = 1 
         cursour_user.execute(f"INSERT INTO users VALUES (?,?,?,?,?)", (nowUser, user_data['user_name'], user_data['surname'], i, t))
         connect.commit()
         msg = f'{user_data["user_name"]} {user_data["surname"]} готов начать тест?'
@@ -74,10 +84,12 @@ def process_surname(message):
     else:
         cursour_user.execute(f"SELECT user_try FROM users WHERE id={nowUser}")
         t = cursour_user.fetchone()[0]
-            
+                
         if t <= 5:
-            print(t)  
-            cursour_user.execute(f"UPDATE users SET id = '{nowUser}', fstName = '{user_data['user_name']}', secName = '{user_data['surname']}', userResault = '{i}', user_try = '{t}' WHERE id = '{nowUser}'")
+            print("User trys:")
+            print(t)
+              
+            cursour_user.execute(f"UPDATE users SET user_try = '{t}' WHERE id = '{nowUser}'")
             connect.commit()
             msg = f'{user_data["user_name"]} {user_data["surname"]} готов начать тест?'
             keyboard = [
@@ -90,6 +102,7 @@ def process_surname(message):
                 cursour_user.execute(f"SELECT userResault FROM users WHERE id={nowUser}")
                 res = cursour_user.fetchone()[0]
                 bot.send_message(message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} вы уже использовали все ваши попытки! Ваш последний тест был пройден на {res} из 5')
+                
 
         
 @bot.callback_query_handler(func=lambda call: True)
@@ -97,6 +110,16 @@ def callback_query(call):
     global used_questions
     global i
 
+    connect = sqlite3.connect('users.db')
+    cursour = connect.cursor()
+    user_id = call.message.chat.id
+    
+    cursour.execute(f"SELECT user_try FROM users WHERE id={user_id}")
+    t = cursour.fetchone()[0] 
+    
+    cursour.execute(f"SELECT userResault FROM users WHERE id={user_id}")
+    userRes = cursour.fetchone()[0] 
+    
     if call.data == 'button1':
         # Проверяем, есть ли еще доступные вопросы
         if len(used_questions) <= len(all_questions):
@@ -126,59 +149,92 @@ def callback_query(call):
                 else:
                     bot.send_message(call.message.chat.id, text=question_text)
             else:
-                bot.send_message(call.message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} вопросы закончились. Ты решил {i} из 5. Пройти снова пропиши /start')
-                connect = sqlite3.connect('users.db')
-                cursour = connect.cursor()
-                user_id = call.message.chat.id
-                
-                cursour.execute(f"SELECT user_try FROM users WHERE id={user_id}")
-                t = cursour.fetchone()
-                print(t)
-                t = t[0]               
+                bot.send_message(call.message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} вопросы закончились. Ты решил {i} из 5. Пройти снова пропиши /start')             
                 t+=1
-                print(t) 
-                              
+                print("User trys:")
+                print(t)
+                
+                print("User previous resault: ")
+                print(userRes)
+                print(i)
+                
+                if userRes > i:
+                    cursour.execute(f"UPDATE users SET user_try = '{t}' WHERE id = '{user_id}'")
+                    connect.commit() 
+                    connect.close()
+                    print("Результат не обновлен тк прошлый результат был больше чем текущий") 
+                    i=0          
+            
+                else:
+                    cursour.execute(f"UPDATE users SET userResault = '{i}', user_try = '{t}' WHERE id = '{user_id}'")
+                    connect.commit() 
+                    connect.close()
+                    print("Записано, так как прошый рещультат был меньше")
+                    i = 0
+        else:
+            bot.send_message(call.message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} вопросы закончились. Ты решил {i} из 5. Пройти снова пропиши /start')  
+                 
+            t+=1
+            print("User trys:")
+            print(t)
+             
+            print("User previous resault: ")
+            print(userRes)
+            print(i)
+            
+            if userRes > i:
+                cursour.execute(f"UPDATE users SET user_try = '{t}' WHERE id = '{user_id}'")
+                connect.commit() 
+                connect.close()
+                print("Результат не обновлен тк прошлый результат был больше чем текущий") 
+                i=0          
+            
+            else:
                 cursour.execute(f"UPDATE users SET userResault = '{i}', user_try = '{t}' WHERE id = '{user_id}'")
                 connect.commit() 
                 connect.close()
+                print("Записано, так как прошый рещультат был меньше")
                 i = 0
-        else:
-            bot.send_message(call.message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} вопросы закончились. Ты решил {i} из 5. Пройти снова пропиши /start')
-            connect = sqlite3.connect('users.db')
-            cursour = connect.cursor()
-            user_id = call.message.chat.id
+    elif call.data == 'button2':
+        bot.send_message(call.message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} тестирование завершено. Ты решил {i} из 5. Пройти снова пропиши /start' )            
+        t+=1
+        print("User trys:")
+        print(t)
+        
+        
+        print("User previous resault: ")
+        print(userRes)
+        print(i)
+         
+        if userRes > i:
+            cursour.execute(f"UPDATE users SET user_try = '{t}' WHERE id = '{user_id}'")
+            connect.commit() 
+            connect.close()
+            print("Результат не обновлен тк прошлый результат был больше чем текущий") 
+            i=0          
             
-            cursour.execute(f"SELECT user_try FROM users WHERE id={user_id}")
-            t = cursour.fetchone()
-            print(t)
-            t = t[0]               
-            t+=1
-            print(t)               
+        else:
             cursour.execute(f"UPDATE users SET userResault = '{i}', user_try = '{t}' WHERE id = '{user_id}'")
             connect.commit() 
             connect.close()
+            print("Записано, так как прошый рещультат был меньше")
             i = 0
-    elif call.data == 'button2':
-        bot.send_message(call.message.chat.id, f'{user_data["user_name"]} {user_data["surname"]} тестирование завершено. Ты решил {i} из 5. Пройти снова пропиши /start' )
-        connect = sqlite3.connect('users.db')
-        cursour = connect.cursor()
-        user_id = call.message.chat.id
-        
-        cursour.execute(f"SELECT user_try FROM users WHERE id={user_id}")
-        t = cursour.fetchone()
-        print(t)
-        t = t[0]               
-        t+=1
-        print(t)               
-        cursour.execute(f"UPDATE users SET userResault = '{i}', user_try = '{t}' WHERE id = '{user_id}'")
-        connect.commit() 
-        connect.close()
-        i = 0
 
 @bot.message_handler(func=lambda message: True)
 def test_message(message):
     global i
     global t
+    
+    connect = sqlite3.connect('users.db')
+    cursour = connect.cursor()
+    user_id = message.chat.id 
+    
+    cursour.execute(f"SELECT userResault FROM users WHERE id={user_id}")
+    userRes = cursour.fetchone()[0] 
+    
+    cursour.execute(f"SELECT user_try FROM users WHERE id={user_id}")
+    t = cursour.fetchone()[0]
+    
     # Проверяем, есть ли еще доступные вопросы
     if len(used_questions) <= len(all_questions):
         # Получаем последний использованный вопрос
@@ -209,23 +265,27 @@ def test_message(message):
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 bot.send_message(message.chat.id, msg, reply_markup=reply_markup)
     else:
-        bot.reply_to(message, f'{user_data["user_name"]} {user_data["surname"]} вопросы закончились. Ты решил {i} из 5. Пройти снова пропиши /start')
-        connect = sqlite3.connect('users.db')
-        cursour = connect.cursor()
-        user_id = message.chat.id
-        
-        cursour.execute("SELECT user_try FROM users")
-        t = cursour.fetchone()
-        t = t[0]
-        
+        bot.reply_to(message, f'{user_data["user_name"]} {user_data["surname"]} вопросы закончились. Ты решил {i} из 5. Пройти снова пропиши /start')              
         t+=1
-        print(t)
+        print("User trys:")
+        print(t)   
         
-        cursour.execute(f"UPDATE users SET userResault = '{i}', user_try = '{t}' WHERE id = '{user_id}'")
-        connect.commit()
-        
-        connect.close()
-        i = 0
+        print("User previous resault: ")
+        print(userRes)
+         
+        if userRes > i:
+            cursour.execute(f"UPDATE users SET user_try = '{t}' WHERE id = '{user_id}'")
+            connect.commit() 
+            connect.close()
+            print("Результат не обновлен тк прошлый результат был больше чем текущий")  
+            i=0         
+            
+        else:
+            cursour.execute(f"UPDATE users SET userResault = '{i}', user_try = '{t}' WHERE id = '{user_id}'")
+            connect.commit() 
+            connect.close()
+            print("Записано, так как прошый рещультат был меньше")
+            i=0
 
         
 bot.polling()
